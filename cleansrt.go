@@ -71,25 +71,42 @@ func readLines(r io.Reader) []string {
 
 func cleanSRT(lines []string) string {
 	timestampRe := regexp.MustCompile(`^\d{2}:\d{2}:\d{2},\d{3}`)
-	var deduped []string
+	var paragraphs []string
+	var currentParagraph []string
 	lastLine := ""
 
 	for _, line := range lines {
-		line = strings.TrimSpace(line)
-		if line == "" || timestampRe.MatchString(line) || isNumber(line) {
+		trimmed := strings.TrimSpace(line)
+
+		if trimmed == "" {
+			if len(currentParagraph) > 0 {
+				paragraphs = append(paragraphs, strings.Join(currentParagraph, " "))
+				currentParagraph = nil
+			}
 			continue
 		}
-		line = strings.TrimPrefix(line, ">>")
-		line = strings.TrimSpace(line)
-		if line != "" && line != lastLine {
-			deduped = append(deduped, line)
-			lastLine = line
+
+		if timestampRe.MatchString(trimmed) || isNumber(trimmed) {
+			continue
+		}
+
+		if strings.HasPrefix(trimmed, ">>") {
+			trimmed = strings.TrimPrefix(trimmed, ">>")
+		}
+
+		trimmed = strings.TrimSpace(trimmed)
+
+		if trimmed != "" && trimmed != lastLine {
+			currentParagraph = append(currentParagraph, trimmed)
+			lastLine = trimmed
 		}
 	}
 
-	text := strings.Join(deduped, " ")
-	text = regexp.MustCompile(`\s{2,}`).ReplaceAllString(text, " ")
-	return strings.TrimSpace(text)
+	if len(currentParagraph) > 0 {
+		paragraphs = append(paragraphs, strings.Join(currentParagraph, " "))
+	}
+
+	return strings.Join(paragraphs, "\n\n")
 }
 
 func isNumber(s string) bool {
