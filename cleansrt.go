@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
+	"path/filepath"
 	"regexp"
 	"strings"
 
@@ -13,42 +15,63 @@ import (
 
 func main() {
 	app := &cli.App{
-		Name:  "clean_srt",
-		Usage: "Converts .srt subtitles into human-readable text",
+		Name:  "cleansrt",
+		Usage: "Downloads and cleans YouTube auto-generated subtitles into readable text",
 		Flags: []cli.Flag{
 			&cli.StringFlag{
 				Name:    "output",
 				Aliases: []string{"o"},
-				Usage:   "Output file path (default: stdout)",
+				Usage:   "Output file path (default: transcript.txt)",
 			},
 		},
-		ArgsUsage: "<input.srt>",
+		ArgsUsage: "<youtube_url>",
 		Action: func(c *cli.Context) error {
 			if c.NArg() < 1 {
-				return cli.Exit("Please provide an input .srt file", 1)
+				return cli.Exit("Please provide a YouTube URL", 1)
 			}
 
-			inputPath := c.Args().Get(0)
+			youtubeURL := c.Args().Get(0)
 			outputPath := c.String("output")
+			if outputPath == "" {
+				outputPath = "transcript.txt"
+			}
 
-			f, err := os.Open(inputPath)
+			tmpDir, err := os.MkdirTemp("", "cleansrt_*")
 			if err != nil {
-				return cli.Exit(fmt.Sprintf("Failed to open file: %v", err), 1)
+				return cli.Exit(fmt.Sprintf("Failed to create temp dir: %v", err), 1)
+			}
+			defer os.RemoveAll(tmpDir)
+
+			srtFile := filepath.Join(tmpDir, "transcript.en.srt")
+			ytdlpCmd := exec.Command("yt-dlp",
+				"--write-auto-sub",
+				"--sub-lang", "en",
+				"--skip-download",
+				"--convert-subs", "srt",
+				"-o", filepath.Join(tmpDir, "transcript.%(ext)s"),
+				youtubeURL,
+			)
+			ytdlpCmd.Stdout = os.Stdout
+			ytdlpCmd.Stderr = os.Stderr
+			if err := ytdlpCmd.Run(); err != nil {
+				return cli.Exit(fmt.Sprintf("yt-dlp failed: %v", err), 1)
+			}
+
+			f, err := os.Open(srtFile)
+			if err != nil {
+				return cli.Exit(fmt.Sprintf("Failed to open %s: %v", srtFile, err), 1)
 			}
 			defer f.Close()
 
 			lines := readLines(f)
 			cleaned := cleanSRT(lines)
 
-			if outputPath != "" {
-				err := os.WriteFile(outputPath, []byte(cleaned), 0644)
-				if err != nil {
-					return cli.Exit(fmt.Sprintf("Failed to write file: %v", err), 1)
-				}
-				fmt.Printf("Transcript written to: %s\n", outputPath)
-			} else {
-				fmt.Println(cleaned)
+			err = os.WriteFile(outputPath, []byte(cleaned+"\n"), 0644)
+			if err != nil {
+				return cli.Exit(fmt.Sprintf("Failed to write output: %v", err), 1)
 			}
+
+			fmt.Printf("✅ Clean transcript saved to: %s\n", outputPath)
 			return nil
 		},
 	}
