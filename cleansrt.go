@@ -94,22 +94,15 @@ func readLines(r io.Reader) []string {
 
 func cleanSRT(lines []string) string {
 	timestampRe := regexp.MustCompile(`^\d{2}:\d{2}:\d{2},\d{3}`)
-	var paragraphs []string
-	var currentParagraph []string
+	var textBuilder strings.Builder
 	lastLine := ""
 
+	// Gather all lines into one big text block first
 	for _, line := range lines {
 		trimmed := strings.TrimSpace(line)
 
-		if trimmed == "" {
-			if len(currentParagraph) > 0 {
-				paragraphs = append(paragraphs, strings.Join(currentParagraph, " "))
-				currentParagraph = nil
-			}
-			continue
-		}
-
-		if timestampRe.MatchString(trimmed) || isNumber(trimmed) {
+		// Skip timestamps, indices, and empty lines
+		if trimmed == "" || timestampRe.MatchString(trimmed) || isNumber(trimmed) {
 			continue
 		}
 
@@ -119,17 +112,36 @@ func cleanSRT(lines []string) string {
 
 		trimmed = strings.TrimSpace(trimmed)
 
+		// Avoid repeating the same line twice
 		if trimmed != "" && trimmed != lastLine {
-			currentParagraph = append(currentParagraph, trimmed)
+			textBuilder.WriteString(trimmed + " ")
 			lastLine = trimmed
 		}
 	}
 
-	if len(currentParagraph) > 0 {
-		paragraphs = append(paragraphs, strings.Join(currentParagraph, " "))
+	// Split sentences on punctuation
+	text := textBuilder.String()
+	sentenceRe := regexp.MustCompile(`([.!?])\s+`)
+	sentences := sentenceRe.Split(text, -1)
+	matches := sentenceRe.FindAllStringSubmatchIndex(text, -1)
+
+	var result []string
+	for i, sentence := range sentences {
+		sentence = strings.TrimSpace(sentence)
+		if sentence == "" {
+			continue
+		}
+
+		// Add punctuation back if present
+		if i < len(matches) {
+			sentence += text[matches[i][0]:matches[i][1]]
+		}
+
+		result = append(result, sentence)
 	}
 
-	return strings.Join(paragraphs, "\n\n")
+	// Join each sentence with two newlines
+	return strings.Join(result, "\n\n")
 }
 
 func isNumber(s string) bool {
