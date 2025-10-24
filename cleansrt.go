@@ -19,8 +19,8 @@ func main() {
 		Usage: "Downloads and cleans YouTube auto-generated subtitles into readable text",
 		Flags: []cli.Flag{
 			&cli.StringFlag{
-				Name:    "output",
-				Aliases: []string{"o"},
+				Name:    "outputdir",
+				Aliases: []string{"od"},
 				Usage:   "Output file path (default: transcript.txt)",
 			},
 		},
@@ -31,23 +31,50 @@ func main() {
 			}
 
 			youtubeURL := c.Args().Get(0)
-			outputPath := c.String("output")
-			if outputPath == "" {
-				outputPath = "transcript.txt"
+			outputDir := c.String("outputdir")
+			if outputDir == "" {
+				wd, err := os.Getwd()
+				if err != nil {
+					return cli.Exit(fmt.Sprintf("failed to get cwd: %v", err), 1)
+				}
+				outputDir = wd
 			}
+
+			// If output flag is not provided, get video title using yt-dlp
+			titleCmd := exec.Command("yt-dlp", "--get-title", youtubeURL)
+			titleBytes, err := titleCmd.Output()
+			if err != nil {
+				return cli.Exit(fmt.Sprintf("Failed to get video title: %v", err), 1)
+			}
+
+			title := strings.TrimSpace(string(titleBytes))
+
+			// Sanitize title for filesystem (remove illegal chars)
+			title = strings.Map(func(r rune) rune {
+				switch r {
+				case '/', '\\', ':', '*', '?', '"', '<', '>', '|':
+					return '-'
+				default:
+					return r
+				}
+			}, title)
+			fmt.Printf("title is %v\n", title)
+
+			outputFile := fmt.Sprintf("%s/%s.txt", outputDir, title)
 
 			tmpDir, err := os.MkdirTemp("", "cleansrt_*")
 			if err != nil {
 				return cli.Exit(fmt.Sprintf("Failed to create temp dir: %v", err), 1)
 			}
 			defer os.RemoveAll(tmpDir)
+			srtTmpFile := filepath.Join(tmpDir, "transcript.en.srt")
 
-			srtFile := filepath.Join(tmpDir, "transcript.en.srt")
 			ytdlpCmd := exec.Command("yt-dlp",
 				"--write-auto-sub",
 				"--sub-lang", "en",
 				"--skip-download",
 				"--convert-subs", "srt",
+				// -o command appends .en.srt, so can't use srtTmpFile directly
 				"-o", filepath.Join(tmpDir, "transcript.%(ext)s"),
 				youtubeURL,
 			)
@@ -57,21 +84,21 @@ func main() {
 				return cli.Exit(fmt.Sprintf("yt-dlp failed: %v", err), 1)
 			}
 
-			f, err := os.Open(srtFile)
+			f, err := os.Open(srtTmpFile)
 			if err != nil {
-				return cli.Exit(fmt.Sprintf("Failed to open %s: %v", srtFile, err), 1)
+				return cli.Exit(fmt.Sprintf("Failed to open %s: %v", srtTmpFile, err), 1)
 			}
 			defer f.Close()
 
 			lines := readLines(f)
-			cleaned := cleanSRT(lines)
+			cleaned := formatSRTFileAsHumanReadable(lines)
 
-			err = os.WriteFile(outputPath, []byte(cleaned+"\n"), 0644)
+			err = os.WriteFile(outputFile, []byte(cleaned+"\n"), 0644)
 			if err != nil {
 				return cli.Exit(fmt.Sprintf("Failed to write output: %v", err), 1)
 			}
 
-			fmt.Printf("✅ Clean transcript saved to: %s\n", outputPath)
+			fmt.Printf("Clean transcript saved to: %s\n", outputDir)
 			return nil
 		},
 	}
@@ -92,7 +119,7 @@ func readLines(r io.Reader) []string {
 	return lines
 }
 
-func cleanSRT(lines []string) string {
+func formatSRTFileAsHumanReadable(lines []string) string {
 	timestampRe := regexp.MustCompile(`^\d{2}:\d{2}:\d{2},\d{3}`)
 	var textBuilder strings.Builder
 	lastLine := ""
