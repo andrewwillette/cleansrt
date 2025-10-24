@@ -164,11 +164,31 @@ func formatSRTFileAsHumanReadable(lines []string) string {
 			sentence += text[matches[i][0]:matches[i][1]]
 		}
 
-		result = append(result, sentence)
+		chunks := splitByLength(sentence, 130)
+
+		result = append(result, chunks...)
 	}
 
 	// Join each sentence with two newlines
 	return strings.Join(result, "\n\n")
+}
+
+func splitByLength(s string, max int) []string {
+	var parts []string
+	words := strings.Fields(s)
+
+	var line strings.Builder
+	for _, word := range words {
+		if line.Len()+len(word)+1 > max {
+			parts = append(parts, strings.TrimSpace(line.String()))
+			line.Reset()
+		}
+		line.WriteString(word + " ")
+	}
+	if line.Len() > 0 {
+		parts = append(parts, strings.TrimSpace(line.String()))
+	}
+	return parts
 }
 
 func isNumber(s string) bool {
