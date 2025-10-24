@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"fmt"
 	"io"
+	"log"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -12,6 +13,15 @@ import (
 
 	"github.com/urfave/cli/v2"
 )
+
+// simple logger wrapper
+var debugEnabled bool
+
+func debugf(format string, args ...interface{}) {
+	if debugEnabled {
+		log.Printf("[DEBUG] "+format, args...)
+	}
+}
 
 func main() {
 	app := &cli.App{
@@ -23,9 +33,14 @@ func main() {
 				Aliases: []string{"od"},
 				Usage:   "Output file path (default: current working directory)",
 			},
+			&cli.BoolFlag{
+				Name:  "debug",
+				Usage: "Enable debug logging output",
+			},
 		},
 		ArgsUsage: "<youtube_url>",
 		Action: func(c *cli.Context) error {
+			debugEnabled = c.Bool("debug")
 			if c.NArg() < 1 {
 				return cli.Exit("Please provide a YouTube URL", 1)
 			}
@@ -39,17 +54,17 @@ func main() {
 				}
 				outputDir = wd
 			}
+			debugf("Using output directory: %s", outputDir)
 
-			// If output flag is not provided, get video title using yt-dlp
 			titleCmd := exec.Command("yt-dlp", "--get-title", youtubeURL)
 			titleBytes, err := titleCmd.Output()
 			if err != nil {
-				return cli.Exit(fmt.Sprintf("Failed to get video title: %v", err), 1)
+				return cli.Exit(fmt.Sprintf("Failed to get video title with youtubeURL: %v, %v", youtubeURL, err), 1)
 			}
 
 			title := strings.TrimSpace(string(titleBytes))
+			debugf("Video title: %s", title)
 
-			// Sanitize title for filesystem (remove illegal chars)
 			title = strings.Map(func(r rune) rune {
 				switch r {
 				case '/', '\\', ':', '*', '?', '"', '<', '>', '|':
@@ -58,31 +73,39 @@ func main() {
 					return r
 				}
 			}, title)
-			fmt.Printf("title is %v\n", title)
 
 			outputFile := fmt.Sprintf("%s/%s.txt", outputDir, title)
+			debugf("Output file will be: %s", outputFile)
 
 			tmpDir, err := os.MkdirTemp("", "cleansrt_*")
 			if err != nil {
 				return cli.Exit(fmt.Sprintf("Failed to create temp dir: %v", err), 1)
 			}
 			defer os.RemoveAll(tmpDir)
+			debugf("Temporary directory: %s", tmpDir)
+
 			srtTmpFile := filepath.Join(tmpDir, "transcript.en.srt")
+			debugf("Temporary subtitle file path: %s", srtTmpFile)
 
 			ytdlpCmd := exec.Command("yt-dlp",
 				"--write-auto-sub",
 				"--sub-lang", "en",
 				"--skip-download",
 				"--convert-subs", "srt",
-				// -o command appends .en.srt, so can't use srtTmpFile directly
 				"-o", filepath.Join(tmpDir, "transcript.%(ext)s"),
 				youtubeURL,
 			)
-			ytdlpCmd.Stdout = os.Stdout
-			ytdlpCmd.Stderr = os.Stderr
+
+			if debugEnabled {
+				ytdlpCmd.Stdout = os.Stderr // send yt-dlp output to stderr
+				ytdlpCmd.Stderr = os.Stderr
+			}
+
+			debugf("Running yt-dlp command...")
 			if err := ytdlpCmd.Run(); err != nil {
 				return cli.Exit(fmt.Sprintf("yt-dlp failed: %v", err), 1)
 			}
+			debugf("yt-dlp finished successfully")
 
 			f, err := os.Open(srtTmpFile)
 			if err != nil {
@@ -91,22 +114,24 @@ func main() {
 			defer f.Close()
 
 			lines := readLines(f)
+			debugf("Read %d lines from subtitle file", len(lines))
 			cleaned := formatSRTFileAsHumanReadable(lines)
+			debugf("Formatted transcript length: %d bytes", len(cleaned))
 
 			err = os.WriteFile(outputFile, []byte(cleaned+"\n"), 0644)
 			if err != nil {
 				return cli.Exit(fmt.Sprintf("Failed to write output: %v", err), 1)
 			}
 
-			fmt.Printf("Clean transcript saved to: %s\n", outputDir)
+			// Output only the file path (for scripts)
+			fmt.Println(outputFile)
 			return nil
 		},
 	}
 
 	err := app.Run(os.Args)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "%v\n", err)
-		os.Exit(1)
+		log.Fatalf("%v\n", err)
 	}
 }
 
@@ -124,11 +149,8 @@ func formatSRTFileAsHumanReadable(lines []string) string {
 	var textBuilder strings.Builder
 	lastLine := ""
 
-	// Gather all lines into one big text block first
 	for _, line := range lines {
 		trimmed := strings.TrimSpace(line)
-
-		// Skip timestamps, indices, and empty lines
 		if trimmed == "" || timestampRe.MatchString(trimmed) || isNumber(trimmed) {
 			continue
 		}
@@ -136,17 +158,14 @@ func formatSRTFileAsHumanReadable(lines []string) string {
 		if strings.HasPrefix(trimmed, ">>") {
 			trimmed = strings.TrimPrefix(trimmed, ">>")
 		}
-
 		trimmed = strings.TrimSpace(trimmed)
 
-		// Avoid repeating the same line twice
 		if trimmed != "" && trimmed != lastLine {
 			textBuilder.WriteString(trimmed + " ")
 			lastLine = trimmed
 		}
 	}
 
-	// Split sentences on punctuation
 	text := textBuilder.String()
 	sentenceRe := regexp.MustCompile(`([.!?])\s+`)
 	sentences := sentenceRe.Split(text, -1)
@@ -159,24 +178,20 @@ func formatSRTFileAsHumanReadable(lines []string) string {
 			continue
 		}
 
-		// Add punctuation back if present
 		if i < len(matches) {
 			sentence += text[matches[i][0]:matches[i][1]]
 		}
 
 		chunks := splitByLength(sentence, 130)
-
 		result = append(result, chunks...)
 	}
 
-	// Join each sentence with two newlines
 	return strings.Join(result, "\n\n")
 }
 
 func splitByLength(s string, max int) []string {
 	var parts []string
 	words := strings.Fields(s)
-
 	var line strings.Builder
 	for _, word := range words {
 		if line.Len()+len(word)+1 > max {
