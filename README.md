@@ -13,6 +13,6 @@ COMMANDS:
    help, h  Shows a list of commands or help for one command
 
 GLOBAL OPTIONS:
-   --outputdir value, --od value  Output file path (default: transcript.txt)
+   --outputdir value, --od value  Output file path (default: current working directory)
    --help, -h                     show help
 ```

@@ -21,7 +21,7 @@ func main() {
 			&cli.StringFlag{
 				Name:    "outputdir",
 				Aliases: []string{"od"},
-				Usage:   "Output file path (default: transcript.txt)",
+				Usage:   "Output file path (default: current working directory)",
 			},
 		},
 		ArgsUsage: "<youtube_url>",
