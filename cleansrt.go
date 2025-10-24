@@ -14,14 +14,7 @@ import (
 	"github.com/urfave/cli/v2"
 )
 
-// simple logger wrapper
 var debugEnabled bool
-
-func debugf(format string, args ...interface{}) {
-	if debugEnabled {
-		log.Printf("[DEBUG] "+format, args...)
-	}
-}
 
 func main() {
 	app := &cli.App{
@@ -132,6 +125,12 @@ func main() {
 	err := app.Run(os.Args)
 	if err != nil {
 		log.Fatalf("%v\n", err)
+	}
+}
+
+func debugf(format string, args ...interface{}) {
+	if debugEnabled {
+		log.Printf("[DEBUG] "+format, args...)
 	}
 }
 
