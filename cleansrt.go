@@ -154,9 +154,6 @@ func formatSRTFileAsHumanReadable(lines []string) string {
 			continue
 		}
 
-		if strings.HasPrefix(trimmed, ">>") {
-			trimmed = strings.TrimPrefix(trimmed, ">>")
-		}
 		trimmed = strings.TrimSpace(trimmed)
 
 		if trimmed != "" && trimmed != lastLine {
